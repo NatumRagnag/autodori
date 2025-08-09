@@ -193,3 +193,30 @@ class TestSpeedTimer:
             print(f"Standard Deviation: {stddev * 1000:.6f} ms")
             print(f"Min Time: {min(self.execution_times) * 1000:.6f} ms")
             print(f"Max Time: {max(self.execution_times) * 1000:.6f} ms")
+
+import json
+import logging
+from pathlib import Path
+import sys
+
+def get_available_servers():
+    """读取 interface.json 并返回可用服务器名称的列表。"""
+    
+    # 首先，确定基础路径
+    if getattr(sys, 'frozen', False):
+        base_path = Path(sys.executable).parent
+    else:
+        base_path = Path(__file__).parent.parent # 假设 util.py 在项目根目录的子目录中，或者调整此路径
+
+    try:
+        # 使用绝对路径来查找 assets
+        interface_file = base_path / "assets/interface.json"
+        if not interface_file.exists():
+            logging.error("assets/interface.json 未找到。")
+            return []
+        interface_data = json.loads(interface_file.read_text(encoding="utf-8"))
+        resources = interface_data.get("resource", [])
+        return [res.get("name", f"Unnamed-{i}") for i, res in enumerate(resources)]
+    except Exception as e:
+        logging.error(f"读取或解析服务器列表失败: {e}")
+        return []
