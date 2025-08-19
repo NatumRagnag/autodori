@@ -574,48 +574,233 @@ def check_update():
         logging.error(f"检查更新失败: {e}")
 
 # --- 主入口 ---
+
+# ==== UI Control (manual delay) support & FULL song unlock ====
+
+# Override: allow FULL songs (remove previous restriction)
+def check_song_available(name, id_, difficulty):
+    """
+    解除 FULL 类型限制：任何歌曲均可返回 True。
+    （保留最近一次记录回避逻辑，若你仍需跳过已成功打过的曲，可在此处自行扩展。）
+    """
+    try:
+        lastmatched = PlayRecord.get_or_none(chart_id=id_, difficulty=difficulty)
+        return (not lastmatched) or (not lastmatched.succeed)
+    except Exception:
+        # 数据库未就绪等情况，一律允许
+        return True
+
+
+class _ControlFileWatcher(threading.Thread):
+    """
+    读取 GUI 写入的控制文件，动态刷新以下全局量：
+      - PHOTOGATE_LATENCY (ms)  —— 首音延迟
+      - OFFSET['wait'] (s)     —— 手动补偿延迟（全局平移）
+    并实现“变化限速”，避免一次性抖动过大。
+    """
+    def __init__(self, path: Union[str, Path], poll_interval: float = 0.2, max_step_ms: float = 20.0):
+        super().__init__(daemon=True)
+        self.path = Path(path) if path else Path("data/ui_control.json")
+        self.poll = poll_interval
+        self.max_step = max_step_ms
+        self._stop = threading.Event()
+        self.last_manual_s = 0.0
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        global PHOTOGATE_LATENCY, OFFSET
+        # 初始化：若文件不存在则创建默认
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if not self.path.exists():
+                self.path.write_text(json.dumps({
+                    "ready": False,
+                    "first_note_delay_ms": PHOTOGATE_LATENCY,
+                    "manual_comp_ms": int(OFFSET.get("wait", 0.0) * 1000),
+                    "recalibrate_now": False
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+        while not self._stop.is_set():
+            try:
+                ctrl = json.loads(self.path.read_text(encoding="utf-8"))
+                # 1) 首音延迟：直接赋值
+                if "first_note_delay_ms" in ctrl:
+                    try:
+                        PHOTOGATE_LATENCY = int(ctrl["first_note_delay_ms"])
+                    except Exception:
+                        pass
+
+                # 2) 手动补偿延迟：做“限速”收敛（单位：秒）
+                if "manual_comp_ms" in ctrl:
+                    try:
+                        target_s = float(ctrl["manual_comp_ms"]) / 1000.0
+                        cur_s = float(OFFSET.get("wait", 0.0))
+                        # 每个轮询周期最多改 max_step_ms
+                        max_step_s = self.max_step / 1000.0
+                        delta = max(-max_step_s, min(max_step_s, target_s - cur_s))
+                        OFFSET["wait"] = cur_s + delta
+                        self.last_manual_s = OFFSET["wait"]
+                    except Exception:
+                        pass
+            except Exception:
+                # 控制文件读取失败时忽略，继续轮询
+                pass
+            time.sleep(self.poll)
+
+
+def _wait_until_ready(control_file: Optional[str], prompt: str = "等待 GUI 准备信号..."):
+    """
+    若设置了 --hold-for-ready，则在进入首音识别前等待 GUI 在 control-file 中写入 {"ready": true}
+    """
+    if not control_file:
+        return
+    path = Path(control_file)
+    logging.info(prompt)
+    while True:
+        try:
+            ctrl = json.loads(path.read_text(encoding="utf-8"))
+            if ctrl.get("ready", False):
+                # 复位 ready 标志，避免下一次误触发
+                ctrl["ready"] = False
+                path.write_text(json.dumps(ctrl, ensure_ascii=False, indent=2), encoding="utf-8")
+                break
+        except Exception:
+            pass
+        time.sleep(0.2)
+
+
+def _capture_screen_to_file(outfile: Union[str, Path]):
+    """
+    初始化最小环境，然后截取一次屏幕保存到 outfile。
+    """
+    configure_log()
+    init_maa()
+    init_player_and_mnt()
+    img = current_player.ipc_capture_display()
+    try:
+        Image.fromarray(img).save(str(outfile))
+    except Exception:
+        # 兼容（h,w,3) numpy 数组或已是 PIL Image
+        if isinstance(img, Image.Image):
+            img.save(str(outfile))
+        else:
+            raise
+    logging.info(f"截屏已保存：{outfile}")
+
+
+def _run_direct_mode(song_query: str, hold_for_ready: bool, control_file: Optional[str]):
+    """
+    直打模式：跳过 MAA 选曲界面，直接保存谱面并进 wait_first_note -> play_song。
+    - song_query：歌名（可模糊）
+    - hold_for_ready：进入 wait_first_note 前是否等待 GUI 准备
+    - control_file：GUI 写入的控制文件路径
+    """
+    # 启动控制文件监听（若配置）
+    watcher = _ControlFileWatcher(control_file) if control_file else None
+    if watcher:
+        watcher.start()
+
+    try:
+        configure_log()
+        init_maa()
+        init_player_and_mnt()
+
+        # 模糊匹配
+        candidates = fuzzy_match_song(song_query)
+        if not candidates:
+            raise SystemExit(f"未匹配到歌曲：{song_query}")
+        chosen = candidates[0] if isinstance(candidates[0], str) else candidates[0][0]
+        logging.info(f"直打模式：选择歌曲：{chosen}")
+
+        save_song(chosen)
+
+        if hold_for_ready:
+            _wait_until_ready(control_file, "直打模式：等待 GUI Ready 信号以开始识别首音...")
+        # 进入首音监测与演奏
+        wait_first_note()
+        play_song()
+    finally:
+        if watcher:
+            watcher.stop()
+        if 'mnt' in globals() and mnt:
+            try:
+                mnt.stop()
+            except Exception:
+                pass
+# ==== End of UI Control additions ====
+
 def main():
-    parser = argparse.ArgumentParser(description="AutoDori 脚本。")
-    parser.add_argument("--ui", action="store_true", help="启动 GUI 控制面板。")
+    parser = argparse.ArgumentParser(description="AutoDori 脚本（增强版 CLI）。")
+    parser.add_argument("--ui", action="store_true", help="启动 GUI 控制面板（仅拉起界面，不直接跑主流程）。")
     parser.add_argument("--server", type=str, default=None, help="指定服务器名称 (例如 'b服' 或 '日服')。")
     parser.add_argument("--difficulty", type=str, choices=["easy", "normal", "hard", "expert", "special"], default="hard", help="指定难度。")
     parser.add_argument("--livemode", type=str, choices=["freelive", "challengelive"], default="freelive", help="指定 Live 模式。")
     parser.add_argument("--liveboost", type=int, default=1, help="所需的最低体力值。")
     parser.add_argument("--debug", action="store_true", help="启用调试模式（对于 UI，提供可视化反馈）。")
     parser.add_argument("--skip-version-check", action="store_true", help="跳过检查新版本。")
+
+    # 新增：直打/控制文件/就绪闸/截图
+    parser.add_argument("--mode", type=str, choices=["pipeline", "direct"], default="pipeline", help="运行模式：pipeline=原流程；direct=直打模式。")
+    parser.add_argument("--song", type=str, default=None, help="直打模式的歌曲（可模糊匹配）。")
+    parser.add_argument("--hold-for-ready", action="store_true", help="直打模式：在进入首音识别前等待 GUI Ready 信号。")
+    parser.add_argument("--control-file", type=str, default="data/ui_control.json", help="GUI 控制文件路径（首音延迟/手动补偿/Ready 等）。")
+    parser.add_argument("--capture-screen", type=str, default=None, help="仅截屏到指定路径并退出。")
+
     args = parser.parse_args()
 
-    # 更新共享状态
+    # 兼容桥：确保旧代码若读取 args.skip 不会崩
+    if not hasattr(args, "skip"):
+        setattr(args, "skip", bool(getattr(args, "skip_version_check", False)))
+
+    # 更新共享状态（供旧逻辑使用）
     app_state.config['server_name'] = args.server
     app_state.config['difficulty'] = args.difficulty
     app_state.config['livemode'] = args.livemode
     app_state.config['min_liveboost'] = args.liveboost
     app_state.config['debug'] = args.debug
 
+    # 检查更新（除非显式跳过）
     if not args.skip_version_check:
         get_current_version()
-        if current_version: check_update()
+        if current_version:
+            check_update()
 
+    # 截图模式：最小化初始化，截一次屏后退出
+    if args.capture_screen:
+        _capture_screen_to_file(args.capture_screen)
+        return
+
+    # UI 模式：仅拉起界面，不跑自动化
     if args.ui:
         try:
-            # 延迟导入以避免循环
-            from autodori_gui import AppGUI, tk
+            # 直接调用 GUI 的 main()（autodori_gui.py 内部已定义）
+            from autodori_gui import main as gui_main
             configure_log(app_state.log_queue)
             logging.info("正在启动 GUI 模式...")
-            root = tk.Tk()
-            gui = AppGUI(root, app_state)
-            gui.run()
-        except ImportError as e:
-            # 打印更详细的错误信息
+            gui_main()
+        except Exception as e:
             import traceback
-            logging.error("导入 GUI 组件失败。请确保所有依赖项都已安装。")
+            logging.error("启动 GUI 失败。")
             logging.error(traceback.format_exc())
-            sys.exit(f"错误：导入 GUI 组件失败。 {e}")
+            sys.exit(f"错误：GUI 启动失败：{e}")
+        return
+
+    # CLI 模式
+    if args.mode == "direct":
+        if not args.song:
+            sys.exit("直打模式需要提供 --song。")
+        _run_direct_mode(args.song, args.hold_for_ready, args.control_file)
     else:
+        # 兼容旧版：走原始自动化线程
         configure_log()
         runner = AutomationRunner(app_state)
         runner.run()
         logging.info("CLI 运行完成。正在退出。")
+
 
 if __name__ == "__main__":
     try:
