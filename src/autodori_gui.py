@@ -2,10 +2,12 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import queue
 import threading
-from PIL import Image, ImageTk
+import subprocess
+import sys
+import signal
+from pathlib import Path
 
-# 导入重构后的运行器和共享的应用状态
-from autodori import AutomationRunner, app_state, configure_log
+from autodori import app_state
 from util import get_available_servers
 
 class AppGUI:
@@ -13,7 +15,8 @@ class AppGUI:
     def __init__(self, root, state):
         self.root = root
         self.state = state
-        self.automation_thread = None
+        self.process = None
+        self.output_queue = queue.Queue()
 
         self.root.title("AutoDori 控制面板")
         self.root.geometry("850x750") # 稍微加宽以容纳新组件
@@ -44,6 +47,7 @@ class AppGUI:
             'livemode': tk.StringVar(value=self.state.config['livemode']),
             'min_liveboost': tk.IntVar(value=self.state.config['min_liveboost']),
             'debug': tk.BooleanVar(value=self.state.config['debug']),
+            'offset_wait': tk.DoubleVar(value=self.state.config.get('offset_wait', 0.0)),
         }
 
         # 参数网格
@@ -87,10 +91,17 @@ class AppGUI:
         self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap=tk.WORD, bg="#1E1E1E", fg="#D4D4D4")
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        self.debug_image_label = ttk.Label(self.debug_frame, text="无调试图像", anchor=tk.CENTER)
-        self.debug_image_label.pack(pady=5)
-        self.debug_text_label = ttk.Label(self.debug_frame, text="OCR: 无 | 匹配: 无", wraplength=380)
-        self.debug_text_label.pack(pady=5)
+        # 调试区域的首音延迟调节
+        offset_frame = ttk.Frame(self.debug_frame)
+        ttk.Label(offset_frame, text="首音延迟:").pack(side=tk.LEFT)
+        offset_entry = ttk.Entry(offset_frame, textvariable=self.param_vars['offset_wait'], width=6)
+        offset_entry.pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_frame, text="-", width=2, command=lambda: self._adjust_offset(-0.1)).pack(side=tk.LEFT)
+        ttk.Button(offset_frame, text="+", width=2, command=lambda: self._adjust_offset(0.1)).pack(side=tk.LEFT)
+        offset_frame.pack(pady=5)
+
+        self.ocr_button = ttk.Button(self.debug_frame, text="OCR歌曲", command=self.ocr_song)
+        self.ocr_button.pack(pady=5)
 
         self.toggle_debug_frame()
 
@@ -111,56 +122,69 @@ class AppGUI:
         self.log_text.config(state='normal')
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state='disabled')
-        self.automation_thread = AutomationRunner(self.state)
-        self.automation_thread.start()
-        self.root.after(100, self.poll_queues)
+
+        cfg = self.state.config
+        cmd = [sys.executable, str(Path(__file__).with_name('autodori.py'))]
+        if cfg['server_name']:
+            cmd.extend(['--server', cfg['server_name']])
+        cmd.extend([
+            '--difficulty', cfg['difficulty'],
+            '--livemode', cfg['livemode'],
+            '--liveboost', str(cfg['min_liveboost'])
+        ])
+        if cfg['debug']:
+            cmd.append('--debug')
+        offset = cfg.get('offset_wait')
+        if offset:
+            cmd.extend(['--offset-wait', str(offset)])
+
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        threading.Thread(target=self._reader_thread, daemon=True).start()
+        self.root.after(100, self.poll_output)
 
     def stop_automation(self):
-        if self.automation_thread and self.automation_thread.is_alive():
-            self.automation_thread.stop_automation()
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.send_signal(signal.SIGINT)
+                self.process.wait(timeout=5)
+            except Exception:
+                self.process.kill()
         self.stop_button.config(state=tk.DISABLED)
 
-    def poll_queues(self):
+    def _reader_thread(self):
+        if not self.process or not self.process.stdout:
+            return
+        for line in self.process.stdout:
+            self.output_queue.put(line.rstrip())
+        self.process.stdout.close()
+
+    def poll_output(self):
         self.log_text.config(state='normal')
-        while not self.state.log_queue.empty():
+        while not self.output_queue.empty():
             try:
-                self.log_text.insert(tk.END, self.state.log_queue.get_nowait() + '\n')
-                self.log_text.see(tk.END)
+                line = self.output_queue.get_nowait()
             except queue.Empty:
                 break
+            else:
+                self.log_text.insert(tk.END, line + '\n')
+                self.log_text.see(tk.END)
         self.log_text.config(state='disabled')
 
-        while not self.state.debug_queue.empty():
-            try:
-                self.update_debug_info(self.state.debug_queue.get_nowait())
-            except queue.Empty:
-                break
-
-        if self.automation_thread and self.automation_thread.is_alive():
-            self.root.after(100, self.poll_queues)
+        if self.process and self.process.poll() is None:
+            self.root.after(100, self.poll_output)
         else:
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
 
-    def update_debug_info(self, data):
-        if 'image' in data:
-            img = data['image']
-            img.thumbnail((350, 200), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            self.debug_image_label.config(image=photo, text="")
-            self.debug_image_label.image = photo
-        else:
-            self.debug_image_label.config(image=None, text="无调试图像")
-            self.debug_image_label.image = None
+    def _adjust_offset(self, delta):
+        current = self.param_vars['offset_wait'].get()
+        self.param_vars['offset_wait'].set(round(current + delta, 1))
 
-        text_info = []
-        if 'text' in data: text_info.append(f"OCR: {data['text']}")
-        if 'match' in data and data['match']: text_info.append(f"匹配: {data['match'][0]} ({data['match'][1]}%)")
-        if 'similarity' in data: text_info.append(f"相似度: {data['similarity']:.2f}")
-        self.debug_text_label.config(text=" | ".join(text_info) if text_info else "无")
+    def ocr_song(self):
+        messagebox.showinfo("提示", "OCR 功能尚未实现。")
 
     def _on_closing(self):
-        if self.automation_thread and self.automation_thread.is_alive():
+        if self.process and self.process.poll() is None:
             if messagebox.askokcancel("退出", "自动化仍在运行。您想停止它并退出吗？"):
                 self.stop_automation()
                 self.root.destroy()

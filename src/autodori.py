@@ -55,6 +55,7 @@ class AppState:
             "livemode": "freelive",
             "min_liveboost": 1,
             "debug": False,
+            "offset_wait": 0.0,
         }
         self.automation_running = threading.Event()
         self.tasker_instance: Optional[Tasker] = None
@@ -156,8 +157,6 @@ def reset_callback_data():
 reset_callback_data()
 
 def check_song_available(name, id_, difficulty):
-    if name.startswith("[FULL]"):
-        return False
     lastmatched = PlayRecord.get_or_none(chart_id=id_, difficulty=difficulty)
     return not lastmatched or not lastmatched.succeed
 
@@ -582,6 +581,7 @@ def main():
     parser.add_argument("--livemode", type=str, choices=["freelive", "challengelive"], default="freelive", help="指定 Live 模式。")
     parser.add_argument("--liveboost", type=int, default=1, help="所需的最低体力值。")
     parser.add_argument("--debug", action="store_true", help="启用调试模式（对于 UI，提供可视化反馈）。")
+    parser.add_argument("--offset-wait", type=float, default=0.0, help="首音延迟补偿，单位毫秒。")
     parser.add_argument("--skip-version-check", action="store_true", help="跳过检查新版本。")
     args = parser.parse_args()
 
@@ -591,6 +591,8 @@ def main():
     app_state.config['livemode'] = args.livemode
     app_state.config['min_liveboost'] = args.liveboost
     app_state.config['debug'] = args.debug
+    app_state.config['offset_wait'] = args.offset_wait
+    OFFSET['wait'] = args.offset_wait
 
     if not args.skip_version_check:
         get_current_version()
@@ -600,7 +602,7 @@ def main():
         try:
             # 延迟导入以避免循环
             from autodori_gui import AppGUI, tk
-            configure_log(app_state.log_queue)
+            configure_log()
             logging.info("正在启动 GUI 模式...")
             root = tk.Tk()
             gui = AppGUI(root, app_state)
