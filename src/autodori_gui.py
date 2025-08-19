@@ -268,6 +268,8 @@ class AppGUI(tk.Tk):
                 "--server", self.var_server.get(),
                 "--difficulty", self.var_difficulty.get(),
                 "--livemode", self.var_livemode.get()]
+        if self.var_debug.get():
+            argv.append("--debug")
         self.log("启动主流程… " + " ".join(argv))
         try:
             self.procman.start(argv, new_console=True)
@@ -288,6 +290,8 @@ class AppGUI(tk.Tk):
                 "--server", self.var_server.get(),
                 "--hold-for-ready",
                 "--control-file", str(DEFAULT_CONTROL_FILE)]
+        if self.var_debug.get():
+            argv.append("--debug")
         self.log("直打模式待命… " + " ".join(argv))
         try:
             self.procman.start(argv, new_console=True)
@@ -350,6 +354,8 @@ class AppGUI(tk.Tk):
         outdir = APP_DIR / "tmp"; outdir.mkdir(exist_ok=True)
         shot = outdir / "screen.png"
         argv = [sys.executable, str(APP_DIR / "autodori.py"), "--capture-screen", str(shot)]
+        if self.var_debug.get():
+            argv.append("--debug")
         self.log("请求主程序截屏…")
         try:
             ret = subprocess.run(argv, cwd=str(APP_DIR))
@@ -366,6 +372,8 @@ class AppGUI(tk.Tk):
             argv2 = [sys.executable, str(APP_DIR / "autodori.py"),
                      "--ocr-from-file", str(image_path),
                      "--roi", f"{ox},{oy},{ow},{oh}"]
+            if self.var_debug.get():
+                argv2.append("--debug")
             try:
                 result = subprocess.run(argv2, cwd=str(APP_DIR), capture_output=True, text=True, encoding="utf-8")
                 txt = result.stdout.strip()
@@ -414,6 +422,8 @@ class AppGUI(tk.Tk):
                          "--server", self.var_server.get(),
                          "--hold-for-ready",
                          "--control-file", str(DEFAULT_CONTROL_FILE)]
+                if self.var_debug.get():
+                    argv3.append("--debug")
                 self.log("直打（OCR）待命… " + " ".join(argv3))
                 try:
                     self.procman.start(argv3, new_console=True)
