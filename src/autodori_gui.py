@@ -211,7 +211,7 @@ class AppGUI(tk.Tk):
         ttk.Combobox(top, values=servers, textvariable=self.var_server, width=10, state="readonly").grid(row=0, column=1, padx=(4,16), sticky="w")
 
         ttk.Label(top, text="难度:").grid(row=0, column=2, sticky="w")
-        ttk.Combobox(top, values=["easy","normal","hard","expert","master"], textvariable=self.var_difficulty, width=10, state="readonly").grid(row=0, column=3, padx=(4,16), sticky="w")
+        ttk.Combobox(top, values=["easy","normal","hard","expert","special"], textvariable=self.var_difficulty, width=10, state="readonly").grid(row=0, column=3, padx=(4,16), sticky="w")
 
         ttk.Label(top, text="模式:").grid(row=0, column=4, sticky="w")
         ttk.Combobox(top, values=["multi","private","free"], textvariable=self.var_livemode, width=10, state="readonly").grid(row=0, column=5, padx=(4,16), sticky="w")
@@ -264,9 +264,12 @@ class AppGUI(tk.Tk):
         if self.procman.is_running():
             messagebox.showinfo("提示", "已有进程在运行。请先停止。")
             return
+        diff = self.var_difficulty.get()
+        if diff == "master":
+            diff = "special"
         argv = [sys.executable, str(APP_DIR / "autodori.py"),
                 "--server", self.var_server.get(),
-                "--difficulty", self.var_difficulty.get(),
+                "--difficulty", diff,
                 "--livemode", self.var_livemode.get()]
         self.log("启动主流程… " + " ".join(argv))
         try:
@@ -281,10 +284,13 @@ class AppGUI(tk.Tk):
         song = simpledialog.askstring("直打模式", "请输入歌曲名（可模糊匹配）：", parent=self)
         if not song:
             return
+        diff = self.var_difficulty.get()
+        if diff == "master":
+            diff = "special"
         argv = [sys.executable, str(APP_DIR / "autodori.py"),
                 "--mode", "direct",
                 "--song", song,
-                "--difficulty", self.var_difficulty.get(),
+                "--difficulty", diff,
                 "--server", self.var_server.get(),
                 "--hold-for-ready",
                 "--control-file", str(DEFAULT_CONTROL_FILE)]
@@ -407,10 +413,13 @@ class AppGUI(tk.Tk):
                 top.destroy()
                 if self.procman.is_running():
                     self.on_stop()
+                diff = self.var_difficulty.get()
+                if diff == "master":
+                    diff = "special"
                 argv3 = [sys.executable, str(APP_DIR / "autodori.py"),
                          "--mode", "direct",
                          "--song", name,
-                         "--difficulty", self.var_difficulty.get(),
+                         "--difficulty", diff,
                          "--server", self.var_server.get(),
                          "--hold-for-ready",
                          "--control-file", str(DEFAULT_CONTROL_FILE)]
