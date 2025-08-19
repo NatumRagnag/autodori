@@ -542,7 +542,16 @@ def _get_override_pipeline():
     livemode_map = {"日服": {"freelive": "フリーライブ", "challengelive": "チャレンジライブ"}, "b服": {"freelive": "自由演出", "challengelive": "挑战演出"}}
     server_livemode = livemode_map.get(chosen_resource_name, livemode_map["日服"])
     
-    select_live_mode_pipeline = {"recognition": "OCR", "model": "ppocr_v5/zh_cn" if chosen_resource_name == "日服" else None, "expected": server_livemode.get(LIVEMODE), "roi": [679, 183, 257, 354], "action": "Click", "post_delay": 1000, "next": ["select_song", "select_live_mode", "live_home_button"], "interrupt": ["login_expired", "connect_failed"]}
+    select_live_mode_pipeline = {
+        "recognition": "OCR",
+        "model": "ppocr_v5/zh_cn", # 统一使用v5多语言模型
+        "expected": server_livemode.get(LIVEMODE), 
+        "roi": [679, 183, 257, 354], 
+        "action": "Click", 
+        "post_delay": 1000, 
+        "next": ["select_song", "select_live_mode", "live_home_button"], 
+        "interrupt": ["login_expired", "connect_failed"]
+    }
     
     return {"set_difficulty": set_difficulty_pipeline, "select_live_mode": select_live_mode_pipeline}
 
