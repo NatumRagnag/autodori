@@ -102,9 +102,6 @@ reset_callback_data()
 
 
 def check_song_available(name, id_, difficulty):
-    if name.startswith("[FULL]"):
-        return False
-
     lastmatched = PlayRecord.get_or_none(chart_id=id_, difficulty=difficulty)
     if lastmatched:
         if not lastmatched.succeed:
@@ -393,6 +390,7 @@ def play_song():
         logging.debug("Adjust offset: {}".format(OFFSET))
         logging.debug("Adjust _actions_to_cmd_offset: {}".format(total_cost))
 
+    input("准备好按回车开始…")
     wait_first_note()
 
     while True:
@@ -467,7 +465,15 @@ def init_maa():
         sys.exit(1)
 
     chosen_resource = None
-    if len(resources) == 1:
+    if chosen_resource_name:
+        for res in resources:
+            if res.get("name") == chosen_resource_name:
+                chosen_resource = res
+                break
+        if chosen_resource is None:
+            logging.fatal(f"指定的资源 '{chosen_resource_name}' 不存在。正在退出。")
+            sys.exit(1)
+    elif len(resources) == 1:
         chosen_resource = resources[0]
         logging.info(f"已自动选择唯一的可用资源: {chosen_resource.get('name', 'Unnamed')}")
     else:
@@ -824,7 +830,35 @@ def main():
         action="store_true",
         help="Specify if skip version check",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch GUI for selecting parameters",
+    )
+    parser.add_argument(
+        "--resource",
+        type=str,
+        help="Specify resource name to use",
+    )
+    parser.add_argument(
+        "--offset-wait",
+        type=float,
+        default=0.0,
+        help="Initial wait offset in milliseconds",
+    )
+    parser.add_argument(
+        "--offset-interval",
+        type=float,
+        default=0.0,
+        help="Manual compensation interval offset in milliseconds",
+    )
     args = parser.parse_args()
+
+    if args.ui:
+        from ui import launch_gui
+
+        launch_gui()
+        return
 
     if args.mode == "main":
         entry = "main"
@@ -836,10 +870,13 @@ def main():
         if current_version != None:
             check_update()
 
-    global DIFFICULTY, MIN_LIVEBOOST, LIVEMODE
+    global DIFFICULTY, MIN_LIVEBOOST, LIVEMODE, chosen_resource_name
     DIFFICULTY = args.difficulty
     LIVEMODE = args.livemode
     MIN_LIVEBOOST = args.liveboost
+    chosen_resource_name = args.resource
+    OFFSET["wait"] = args.offset_wait
+    OFFSET["interval"] = args.offset_interval
 
     init_maa()
     init_player_and_mnt()
