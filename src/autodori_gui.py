@@ -199,7 +199,8 @@ class AppGUI(tk.Tk):
         default_server = servers[0] if servers else "CN"
         self.var_server = tk.StringVar(value=default_server)
         self.var_difficulty = tk.StringVar(value="expert")
-        self.var_livemode = tk.StringVar(value="multi")
+        self.livemode_choices = ["freelive", "challengelive"]
+        self.var_livemode = tk.StringVar(value=self.livemode_choices[0])
         self.var_debug = tk.BooleanVar(value=False)
 
         self.var_first_delay = tk.StringVar(value=str(load_control().get("first_note_delay_ms", 0)))
@@ -214,7 +215,7 @@ class AppGUI(tk.Tk):
         ttk.Combobox(top, values=["easy","normal","hard","expert","special"], textvariable=self.var_difficulty, width=10, state="readonly").grid(row=0, column=3, padx=(4,16), sticky="w")
 
         ttk.Label(top, text="模式:").grid(row=0, column=4, sticky="w")
-        ttk.Combobox(top, values=["multi","private","free"], textvariable=self.var_livemode, width=10, state="readonly").grid(row=0, column=5, padx=(4,16), sticky="w")
+        ttk.Combobox(top, values=self.livemode_choices, textvariable=self.var_livemode, width=10, state="readonly").grid(row=0, column=5, padx=(4,16), sticky="w")
 
         ttk.Checkbutton(top, text="Debug", variable=self.var_debug, command=self._on_debug_toggle).grid(row=0, column=6, padx=(4,16), sticky="w")
 
