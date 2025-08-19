@@ -199,7 +199,8 @@ class AppGUI(tk.Tk):
         default_server = servers[0] if servers else "CN"
         self.var_server = tk.StringVar(value=default_server)
         self.var_difficulty = tk.StringVar(value="expert")
-        self.var_livemode = tk.StringVar(value="multi")
+        self.livemode_choices = ["freelive", "challengelive"]
+        self.var_livemode = tk.StringVar(value=self.livemode_choices[0])
         self.var_debug = tk.BooleanVar(value=False)
 
         self.var_first_delay = tk.StringVar(value=str(load_control().get("first_note_delay_ms", 0)))
@@ -214,7 +215,7 @@ class AppGUI(tk.Tk):
         ttk.Combobox(top, values=["easy","normal","hard","expert","master"], textvariable=self.var_difficulty, width=10, state="readonly").grid(row=0, column=3, padx=(4,16), sticky="w")
 
         ttk.Label(top, text="模式:").grid(row=0, column=4, sticky="w")
-        ttk.Combobox(top, values=["multi","private","free"], textvariable=self.var_livemode, width=10, state="readonly").grid(row=0, column=5, padx=(4,16), sticky="w")
+        ttk.Combobox(top, values=self.livemode_choices, textvariable=self.var_livemode, width=10, state="readonly").grid(row=0, column=5, padx=(4,16), sticky="w")
 
         ttk.Checkbutton(top, text="Debug", variable=self.var_debug, command=self._on_debug_toggle).grid(row=0, column=6, padx=(4,16), sticky="w")
 
@@ -264,12 +265,17 @@ class AppGUI(tk.Tk):
         if self.procman.is_running():
             messagebox.showinfo("提示", "已有进程在运行。请先停止。")
             return
+        livemode = self.var_livemode.get()
+        if livemode not in self.livemode_choices:
+            messagebox.showerror("错误", f"无效模式: {livemode}")
+            return
         argv = [sys.executable, str(APP_DIR / "autodori.py"),
                 "--server", self.var_server.get(),
                 "--difficulty", self.var_difficulty.get(),
-                "--livemode", self.var_livemode.get()]
-        if self.var_debug.get():
-            argv.append("--debug")
+"--livemode", self.var_livemode.get()]
+
+  if self.var_debug.get():
+      argv.append("--debug")
         self.log("启动主流程… " + " ".join(argv))
         try:
             self.procman.start(argv, new_console=True)

@@ -13,6 +13,7 @@ import queue
 from pathlib import Path
 from typing import Optional, Union
 from PIL import Image
+import numpy as np
 
 import requests
 import yaml
@@ -673,6 +674,48 @@ def _wait_until_ready(control_file: Optional[str], prompt: str = "等待 GUI 准
         time.sleep(0.2)
 
 
+def _parse_roi(value: str) -> tuple[int, int, int, int]:
+    try:
+        x, y, w, h = map(int, value.split(","))
+        return x, y, w, h
+    except Exception:
+        raise argparse.ArgumentTypeError("ROI 格式应为 X,Y,W,H")
+
+
+def _ocr_from_file(image_path: Union[str, Path], roi: Optional[tuple[int, int, int, int]], server_name: Optional[str]):
+    """加载资源后对图片执行 SongRecognition OCR。"""
+    interface_file = BASE_PATH / "assets/interface.json"
+    try:
+        interface_data = json.loads(interface_file.read_text(encoding="utf-8"))
+        resources = interface_data.get("resource", [])
+    except Exception as e:
+        sys.exit(f"读取 interface.json 失败: {e}")
+
+    chosen_resource = None
+    if server_name:
+        chosen_resource = next((r for r in resources if r.get("name") == server_name), None)
+    if not chosen_resource and resources:
+        chosen_resource = resources[0]
+    if not chosen_resource:
+        sys.exit("interface.json 中未找到资源。")
+
+    for res_path_str in chosen_resource.get("path", []):
+        resolved_path = res_path_str.replace("{PROJECT_DIR}", str(BASE_PATH))
+        if not maaresource.post_bundle(resolved_path).wait().succeeded:
+            sys.exit(f"加载资源失败: {resolved_path}")
+
+    Toolkit.init_option(str(BASE_PATH))
+
+    img = Image.open(image_path)
+    if roi:
+        x, y, w, h = roi
+        img = img.crop((x, y, x + w, y + h))
+
+    ctx = Context(maaresource)
+    result = ctx.run_recognition("SongRecognition", np.array(img))
+    print(result.best_result.text)
+
+
 def _capture_screen_to_file(outfile: Union[str, Path]):
     """
     初始化最小环境，然后截取一次屏幕保存到 outfile。
@@ -749,8 +792,14 @@ def main():
     parser.add_argument("--hold-for-ready", action="store_true", help="直打模式：在进入首音识别前等待 GUI Ready 信号。")
     parser.add_argument("--control-file", type=str, default="data/ui_control.json", help="GUI 控制文件路径（首音延迟/手动补偿/Ready 等）。")
     parser.add_argument("--capture-screen", type=str, default=None, help="仅截屏到指定路径并退出。")
+    parser.add_argument("--ocr-from-file", type=str, default=None, help="对指定图片执行歌曲 OCR 并退出。")
+    parser.add_argument("--roi", type=_parse_roi, default=None, help="OCR 识别区域，格式 X,Y,W,H。")
 
     args = parser.parse_args()
+
+    if args.ocr_from_file:
+        _ocr_from_file(args.ocr_from_file, args.roi, args.server)
+        return
 
     # 兼容桥：确保旧代码若读取 args.skip 不会崩
     if not hasattr(args, "skip"):
