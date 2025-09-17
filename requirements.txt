@@ -12,3 +12,4 @@ playhouse
 peewee
 pillow
 pyinstaller
+opencv-python

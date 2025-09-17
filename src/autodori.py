@@ -14,6 +14,10 @@ from typing import Optional, Union
 
 import requests
 
+import cv2
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+
 data_path = Path("data")
 data_path.mkdir(exist_ok=True)
 cache_path = Path("cache")
@@ -448,6 +452,61 @@ def wait_first_note():
             logging.error(f"Failed to get screen: {e}")
 
 
+def debug_ocr_song():
+    """Debug helper to OCR song name from a manually selected region."""
+    if maacontroller is None:
+        logging.error("MAA controller not initialized")
+        return
+    try:
+        # Capture screen using MAA controller
+        job = maacontroller.post_screencap()
+        result = job.wait()
+        if not result.succeeded:
+            logging.error("Failed to capture screen")
+            return
+        image = job.result  # numpy.ndarray
+
+        # Let user select ROI using OpenCV
+        roi = cv2.selectROI("OCR Song", image, False)
+        cv2.destroyWindow("OCR Song")
+        x, y, w, h = map(int, roi)
+        if w == 0 or h == 0:
+            logging.info("No region selected")
+            return
+
+        # Run OCR using MAA context
+        context = Context(maatasker._handle)
+        pipeline = {
+            "_debug_song_ocr": {
+                "recognition": "OCR",
+                "only_rec": True,
+                "roi": [x, y, w, h],
+                "model": "ppocr_v5/zh_cn",
+            }
+        }
+        ocr_result = context.run_recognition("_debug_song_ocr", image, pipeline)
+        song_name = ocr_result.best_result.text.strip()
+
+        # Show dialog to edit song name
+        root = tk.Tk()
+        root.withdraw()
+        song_name = simpledialog.askstring("OCR歌曲", "读取到的歌名", initialvalue=song_name)
+        if not song_name:
+            return
+
+        match_name, _ = fuzzy_match_song(song_name)
+        if match_name is None:
+            messagebox.showerror("错误", "未找到匹配歌曲")
+            return
+        save_song(match_name)
+
+        if messagebox.askyesno("开始打歌", f"歌曲: {match_name}\n难度: {DIFFICULTY}"):
+            play_song()
+        else:
+            messagebox.showinfo("提示", "已取消")
+    except Exception as e:
+        logging.error(f"Debug OCR failed: {e}")
+
 def init_maa():
     # 修改：增加 global 声明
     global game_package_name, chosen_resource_name
@@ -649,9 +708,10 @@ def init_player_and_mnt():
     logging.info("Mumu and MNT inited.")
 
 
-def configure_log():
+def configure_log(debug: bool = False):
+    level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=level,
         format="%(asctime)s[%(levelname)s][%(name)s] %(message)s",
         handlers=[
             logging.StreamHandler(),
@@ -787,10 +847,8 @@ def check_update():
 
 
 def main():
-    configure_log()
-
     parser = argparse.ArgumentParser(
-        description="AutoDori script with different modes."
+        description="AutoDori script with different modes.",
     )
     parser.add_argument(
         "--mode",
@@ -824,7 +882,25 @@ def main():
         action="store_true",
         help="Specify if skip version check",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch graphical interface for parameter selection",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output",
+    )
     args = parser.parse_args()
+
+    configure_log(debug=args.debug)
+
+    if args.ui:
+        from gui import run_ui
+
+        run_ui()
+        return
 
     if args.mode == "main":
         entry = "main"
