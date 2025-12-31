@@ -72,7 +72,8 @@
     "ensure_live_mode": {
         "recognition": "OCR",
         "expected": [
-            "ライブスタート"
+            "ライブスタート",
+            "チャレンジライブ"
         ],
         "roi": [
             1031,

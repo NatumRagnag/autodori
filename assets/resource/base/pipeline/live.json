@@ -120,12 +120,15 @@
         ],
         "inverse": true,
         "next": "startlive",
-        "interrupt": [],
+        "interrupt": [
+            "confirm_button",
+            "ok_button"
+        ],
         "roi": [
-            58,
-            580,
-            363,
-            140
+            113,
+            619,
+            123,
+            62
         ]
     },
     "startlive": {

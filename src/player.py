@@ -8,9 +8,11 @@ class Player:
         self.type = type_
         self.package_name = package_name
         self.display_id = -1
-        if type_ == "mumu":
-            self.player = mumuipc.MuMuPlayer(path, index)
-        else:
+        if type_ == "mumuv4":
+            self.player = mumuipc.MuMuPlayer(path, index, "v4")
+        elif type_ == "mumuv5":
+            self.player = mumuipc.MuMuPlayer(path, index, "v5")
+        elif type_ == "ld":
             self.player = ldipc.LDPlayer(path, index)
 
     @property
@@ -18,7 +20,7 @@ class Player:
         return self.player.resolution
 
     def ipc_capture_display(self):
-        if self.type == "mumu":
+        if self.type.startswith("mumu"):
             if self.display_id == -1:
                 self.display_id = self.player.ipc_get_display_id(
                     self.package_name

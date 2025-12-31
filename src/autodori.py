@@ -629,6 +629,10 @@ def init_player_and_mnt():
     if "mumu" in extra_config.keys():
         extra_config = extra_config["mumu"]
         type_ = "mumu"
+        if device.name == "MuMuPlayer12":
+            type_ += "v4"
+        if device.name == "MuMuPlayer12 v5":
+            type_ += "v5"
     elif "ld" in extra_config.keys():
         extra_config = extra_config["ld"]
         type_ = "ld"
@@ -671,7 +675,7 @@ def _get_override_pipeline():
     global chosen_resource_name
     all_pipelines = {}
 
-    # 1. 设置难度的 Pipeline (保持不变)
+    # 1. 设置难度的 Pipeline
     difficulty: str = DIFFICULTY
     roi = {
         "easy": [659, 495, 107, 97],
@@ -700,7 +704,7 @@ def _get_override_pipeline():
             "recognition": "OCR",
             "model": "ppocr_v5/zh_cn",
             "expected": "",
-            "roi": [679, 183, 257, 354],
+            "roi": [653, 162, 304, 410],
             "action": "Click",
             "post_delay": 1000,
             "next": ["select_song", "select_live_mode", "live_home_button"],
@@ -736,7 +740,7 @@ def _get_override_pipeline():
             "recognition": "OCR",
             "model": "ppocr_v5/zh_cn",
             "expected": "",
-            "roi": [679, 183, 257, 354],
+            "roi": [653, 162, 304, 410],
             "action": "Click",
             "post_delay": 1000,
             "next": ["select_song", "select_live_mode", "live_home_button"],
@@ -747,6 +751,15 @@ def _get_override_pipeline():
         elif LIVEMODE == "challengelive":
             livemode_pipeline["expected"] = "チャレンジライブ"
         all_pipelines["select_live_mode"] = livemode_pipeline
+
+    # 3.如果是挑战演出模式，修改任务流以跳过火力检查
+    if LIVEMODE == "challengelive":
+        logging.info("挑战演出模式已激活，将跳过火力检查流程。")
+        all_pipelines["comfirm_song"] = {
+            "next": [
+                "disable_liveplay"
+            ]
+        }
 
     return all_pipelines
 
